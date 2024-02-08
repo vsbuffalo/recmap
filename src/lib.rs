@@ -1,12 +1,12 @@
 //! Functionality for reading and working with recombination maps.
 //!
-//! [`RecMap`] objects can be created from reading in a HapMap-formatted 
+//! [`RecMap`] objects can be created from reading in a HapMap-formatted
 //! recombination map. Note that since the HapMap recombination format does
 //! not include the chromosome lengths, this must be specified too.
 //! A convenience function [`read_seqlens`] is provided to read in TSV-formatted
 //! "genome" files of the chromosome names and lengths.
 //!
-//! Here is a example which loads a recombination map from a HapMap-formatted 
+//! Here is a example which loads a recombination map from a HapMap-formatted
 //! recombination map and calculates the total map lengths.
 //!
 //! ```no_run
