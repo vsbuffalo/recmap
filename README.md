@@ -1,4 +1,4 @@
-# RecMap Library for reading and working with recombination maps in Rust
+# RecMap library for reading and working with recombination maps in Rust
 
 `RecMap` objects can be created from reading in a HapMap-formatted 
 recombination map. Note that since the HapMap recombination format does
