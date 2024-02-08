@@ -6,6 +6,7 @@ license = "MIT"
 authors = ["Vince Buffalo <vsbuffalo@gmail.com>"]
 keywords = ["genomics", "bioinformatics", "compbio"]
 categories = ["science"]
+documentation = "https://docs.rs/recmap/"
 repository = "https://github.com/vsbuffalo/recmap"
 description = "A library for reading and working with recombination maps in Rust"
 
