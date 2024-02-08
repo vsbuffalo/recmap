@@ -1,3 +1,6 @@
+![Crates.io](https://img.shields.io/crates/v/recmap) ![Crates.io](https://img.shields.io/crates/d/recmap) [![docs](https://docs.rs/genomap/badge.svg)](https://docs.rs/recmap) ![Rust CI](https://github.com/vsbuffalo/genomap/actions/workflows/rust.yml/badge.svg)
+
+
 # RecMap library for reading and working with recombination maps in Rust
 
 `RecMap` objects can be created from reading in a HapMap-formatted 
