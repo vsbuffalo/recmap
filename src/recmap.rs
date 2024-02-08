@@ -409,7 +409,7 @@ mod tests {
             "chr2".to_string() => 6004443,
             "chr3".to_string() => 6026894,
         };
-        let rec_map = RecMap::from_hapmap("tests/data/decode_2010_test_map.txt", seqlens).unwrap();
+        let rec_map = RecMap::from_hapmap("tests_data/decode_2010_test_map.txt", seqlens).unwrap();
 
         let dir = tempdir().unwrap();
         let output_path = dir.path().join("output.tsv");
