@@ -28,7 +28,10 @@ where
 
 /// Assert to float values are the same up to `eps`.
 #[allow(dead_code)]
-pub fn assert_floats_eq(left: &[f64], right: &[f64], eps: f64) {
+pub fn assert_floats_eq<T>(left: &[T], right: &[T], eps: T)
+where
+    T: Float + Display,
+{
     assert_eq!(left.len(), right.len());
     for (l, r) in left.iter().zip(right.iter()) {
         assert_float_eq(*l, *r, eps)

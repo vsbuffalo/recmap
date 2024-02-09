@@ -1,9 +1,11 @@
-use csv::ReaderBuilder;
 use genomap::{GenomeMap, GenomeMapError};
 use indexmap::map::IndexMap;
 use ndarray::Array1;
+use num_traits::Float;
 use serde::{Deserialize, Serialize};
+use std::fmt::LowerExp;
 use std::io;
+use std::io::BufRead;
 use std::io::Write;
 use thiserror::Error;
 
@@ -13,7 +15,7 @@ use super::file::{FileError, InputFile};
 use super::numeric::interp1d;
 
 /// The float type for recombination rates.
-pub type RateFloat = f32;
+pub type RateFloat = f64;
 
 /// The integer type for genomic positions.
 ///
@@ -22,7 +24,8 @@ pub type RateFloat = f32;
 /// `i32::MAX` could change this through a `--feature`.
 pub type Position = u64;
 
-const CM_MB_CONVERSION: RateFloat = 1e-8;
+pub const CM_MB_CONVERSION: RateFloat = 1e-8;
+pub const RATE_PRECISION: usize = 8;
 
 #[derive(Error, Debug)]
 pub enum RecMapError {
@@ -46,6 +49,8 @@ pub enum RecMapError {
     LookupOutOfBounds(String, Position),
     #[error("Internal Error")]
     InternalError(String),
+    #[error("Recombination map overuns sequence length for {0} ({1} > {2})")]
+    LengthMismatch(String, Position, Position),
     #[error("GenomeMap Error: error updating GenomeMap")]
     GenomeMapError(#[from] GenomeMapError),
 }
@@ -74,7 +79,7 @@ pub fn read_seqlens(filepath: &str) -> Result<IndexMap<String, Position>, csv::E
 }
 
 /// Storage and methods for a single chromosome's recombination rates and marker positions.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct RateMap {
     /// The n+1 genomic positions of the markers, 0-indexed and ending at the sequence length.
     pub ends: Vec<Position>,
@@ -82,6 +87,37 @@ pub struct RateMap {
     pub rates: Vec<RateFloat>,
     /// The n+1 cumulative map lengths at each genomic position.
     pub map_pos: Vec<RateFloat>,
+}
+
+/// An iterator over the elements of a [`RateMap`]
+pub struct RateMapIter {
+    ends: std::vec::IntoIter<Position>,
+    rates: std::vec::IntoIter<RateFloat>,
+    map_pos: std::vec::IntoIter<RateFloat>,
+}
+
+impl Iterator for RateMapIter {
+    type Item = (Position, RateFloat, RateFloat);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.ends.next(), self.rates.next(), self.map_pos.next()) {
+            (Some(end), Some(rate), Some(map_pos)) => Some((end, rate, map_pos)),
+            _ => None,
+        }
+    }
+}
+
+impl IntoIterator for RateMap {
+    type Item = (Position, RateFloat, RateFloat);
+    type IntoIter = RateMapIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RateMapIter {
+            ends: self.ends.into_iter(),
+            rates: self.rates.into_iter(),
+            map_pos: self.map_pos.into_iter(),
+        }
+    }
 }
 
 impl RateMap {
@@ -96,7 +132,17 @@ impl RateMap {
 
     /// Returns the spans (i.e. widths) in basepairs between each marker.
     pub fn span(&self) -> Vec<Position> {
-        self.ends.windows(2).map(|pair| pair[1] - pair[0]).collect()
+        self.ends
+            .windows(2)
+            .map(|pair| {
+                assert!(
+                    pair[1] >= pair[0],
+                    "invalid positions encountered while calculating span: {:?}",
+                    &pair
+                );
+                pair[1] - pair[0]
+            })
+            .collect()
     }
 
     /// Returns the cumulative mass between each marker.
@@ -128,14 +174,21 @@ impl RateMap {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RecMap {
     pub map: GenomeMap<RateMap>,
+    pub metadata: Option<Vec<String>>,
 }
 
 impl RecMap {
-    /// Create a new [`RecMap`] from a HapMap-formatted recombination map file.
+    /// Create a new [`RecMap`] from a (possibly gzip-compressed) HapMap-formatted recombination map file.
     ///
-    /// This method also supports reading directly from a gzip-compressed file.
+    /// The HapMap recombination map format is (rather unfortunately) very poorly
+    /// specified. This parser is quite permissive, and skips through comment lines
+    /// that begin with `#` and a possible header line that beings with `Chr`.
+    /// Note that this parser *does not* read the cumulative map positions. Instead,
+    /// the cumulative map positions can be calculated directly from the rates and
+    /// the distances between markers.
     ///
     /// The HapMap recombination format looks like:
     ///
@@ -154,39 +207,42 @@ impl RecMap {
     ///
     /// The HapMap format is well-described in the [tskit documentation](https://tskit.dev/msprime/docs/stable/api.html#msprime.RateMap.read_hapmap).
     ///
-    /// This parser is a bit more permissive -- it will allow no headers.
+    /// # Warnings
+    ///
+    /// Given that the HapMap recombination map format is poorly specified, and users often
+    /// implement their own versions, it is **highly recommended** that you always validate
+    /// the parsed recombination map. Ideally check that:
+    ///
+    ///  - The total map length (i.e. in Morgans or centiMorgans) makes sense. Off-by-one
+    ///    errors due to the format not following the 0-indexed end-exclusive format assumed
+    ///    by [`RecMap.from_hapmap`] will often lead to obviously erroneous total map lengths.
+    ///  - Visually plot the recombination map, looking for outlier rates.
+    ///  - If the recombination map includes a fourth
+    ///    
     ///
     pub fn from_hapmap(
         filepath: &str,
-        seqlens: IndexMap<String, Position>,
+        seqlens: &IndexMap<String, Position>,
     ) -> Result<RecMap, RecMapError> {
-        let input_file = InputFile::new(filepath);
+        let mut input_file = InputFile::new(filepath);
 
-        // read one line to check for headers
-        let has_header = input_file.has_header("Chromosome")?;
-
-        let buf_reader = input_file.reader()?;
-
-        let mut rdr = ReaderBuilder::new()
-            .delimiter(b'\t')
-            .has_headers(has_header)
-            .from_reader(buf_reader);
+        let _has_metadata = input_file.collect_metadata("#", "Chr")?;
+        let reader = input_file.continue_reading()?;
 
         let mut rec_map: GenomeMap<RateMap> = GenomeMap::new();
-
         let mut last_chrom: Option<String> = None;
         let mut last_end: Option<Position> = None;
 
-        for result in rdr.records() {
-            let record = result.map_err(RecMapError::HapMapParsingError)?;
+        // this is used for validation only
+        let mut has_fourth_column = false;
+        let mut map_positions: Vec<RateFloat> = Vec::new();
 
-            // remove comment lines (TODO could store in metadata)
-            if record.get(0).map_or(false, |s| s.starts_with('#')) {
-                continue;
-            }
+        for result in reader.lines() {
+            let line = result?;
+            let fields: Vec<&str> = line.split_whitespace().collect();
 
             // get the chrom column
-            let chrom = record.get(0).ok_or(RecMapError::MissingField)?.to_string();
+            let chrom = fields.first().ok_or(RecMapError::MissingField)?.to_string();
 
             // Our parser will always add on the chromosome end. Most times the
             // HapMap file will *not* have this, but we still check.
@@ -202,7 +258,6 @@ impl RecMap {
                             if let Some(&last_end) = chrom_entry.ends.last() {
                                 if last_end != *seq_len {
                                     chrom_entry.ends.push(*seq_len);
-                                    chrom_entry.rates.push(0.0);
                                 }
                             }
                         }
@@ -216,7 +271,7 @@ impl RecMap {
             last_chrom = Some(chrom.clone());
 
             // get the position and rate column, parsing into proper numeric types
-            let end_str = record.get(1).ok_or(RecMapError::MissingField)?;
+            let end_str = fields.get(1).ok_or(RecMapError::MissingField)?;
             let end: Position = end_str.parse().map_err(|_| {
                 dbg!(&end_str);
                 RecMapError::ParseError(format!("Failed to parse end from string: {}", end_str))
@@ -233,7 +288,7 @@ impl RecMap {
                 }
             };
 
-            let rate_str = record.get(2).ok_or(RecMapError::MissingField)?;
+            let rate_str = fields.get(2).ok_or(RecMapError::MissingField)?;
             let rate: RateFloat = rate_str.parse().map_err(|_| {
                 RecMapError::ParseError(format!("Failed to parse rate from string: {}", rate_str))
             })?;
@@ -241,6 +296,18 @@ impl RecMap {
             // check rate isn't NaN or negative
             if rate.is_nan() || rate < 0.0 {
                 return Err(RecMapError::ImproperRate(format!("{}:{}", chrom, end)));
+            }
+
+            // if there is a fourth column (total map length) parse it
+            if let Some(map_pos_str) = fields.get(3) {
+                has_fourth_column = true;
+                let map_pos: RateFloat = map_pos_str.parse().map_err(|_| {
+                    RecMapError::ParseError(format!(
+                        "Failed to parse map position from string: {}",
+                        map_pos_str
+                    ))
+                })?;
+                map_positions.push(map_pos);
             }
 
             // HapMap rates are *always* in cM/Mb, but the natural unit is Morgans, so
@@ -266,6 +333,13 @@ impl RecMap {
                 new_rate_map.ends.push(end);
                 new_rate_map.rates.push(rate);
 
+                // if there is a fourth column, let's use it for validation
+                if has_fourth_column {
+                    //new_rate_map.calc_cumulative_mass();
+                    //assert_floats_eq(&new_rate_map.map_pos, map_positions.as_slice(), 0.01);
+                    //map_positions.clear();
+                }
+
                 rec_map.insert(&chrom, new_rate_map)?;
             }
         }
@@ -273,16 +347,26 @@ impl RecMap {
         // Insert the final entry for the last chromosome outside the loop if needed
         if let Some(last) = last_chrom {
             if let Some(seq_len) = seqlens.get(&last) {
-                let chrom_entry = rec_map.entry_or_default(&last);
+                let chrom_entry = rec_map.get_mut(&last).expect(
+                    "internal error: please report at http://github.com/vsbuffalo/recmap/issues",
+                );
 
                 // Assuming the rate is 0 for these extra entries
                 if chrom_entry.ends.is_empty() || chrom_entry.ends.last().unwrap() != seq_len {
+                    if chrom_entry.ends.last().unwrap() >= seq_len {
+                        let last_end = *chrom_entry.ends.last().unwrap();
+                        return Err(RecMapError::LengthMismatch(last, last_end, *seq_len));
+                    }
                     chrom_entry.ends.push(*seq_len);
                 }
             }
         }
 
-        let mut rec_map = RecMap { map: rec_map };
+        let metadata = input_file.comments;
+        let mut rec_map = RecMap {
+            map: rec_map,
+            metadata,
+        };
         rec_map.generate_map_positions();
         Ok(rec_map)
     }
@@ -349,14 +433,71 @@ impl RecMap {
         Ok(Array1::from_vec(positions))
     }
 
+    /// Write recombination map to HapMap-formatted file.
+    ///
+    /// This file has the usual HapMap recombination map header, and columns:
+    ///  1. Chromosome name
+    ///  2. Position (0-indexed and right-exclusive)
+    ///  3. Rate
+    ///  4. Map position
+    ///
+    /// # Arguments
+    ///  * `filepath`: The filepath to write the recombination map to. If the filepath
+    ///  has an `.gz` extension, the output will be gzip compressed.
+    ///  If `filepath` is `None`, uncompressed output will be written to standard out.
+    pub fn write_hapmap(&self, filepath: Option<&str>) -> Result<(), RecMapError> {
+        let mut writer: Box<dyn Write> = match filepath {
+            Some(path) => {
+                let file = OutputFile::new(path, None);
+                file.writer()?
+            }
+            None => {
+                // Use stdout if filepath is None
+                Box::new(std::io::stdout())
+            }
+        };
+
+        // write that weird HapMap header
+        writeln!(writer, "Chromosome\tPosition(bp)\tRate(cM/Mb)\tMap(cM)")?;
+
+        for (chrom, rate_map) in self.map.iter() {
+            // write the rows
+            let n = rate_map.ends.len();
+            // TODO cut off end
+            let ends = &rate_map.ends[1..n - 1];
+
+            for (i, end) in ends.iter().enumerate() {
+                let rate = rate_map.rates[i + 1];
+                let map_pos = rate_map.map_pos[i + 1];
+
+                // Write the record to the file
+                writeln!(
+                    writer,
+                    "{}\t{}\t{}\t{}",
+                    chrom,
+                    end,
+                    format_float(rate / CM_MB_CONVERSION),
+                    format_float(map_pos),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Write recombination map to a BED-like TSV file.
+    ///
+    /// This file has columns:
+    ///  1. Chromosome name
+    ///  2. Start position (0-indexed)
+    ///  3. End position (0-indexed and right-exclusive)
+    ///  4. Rate
     ///
     /// # Arguments
     ///  * `filepath`: The filepath to write the recombination map to. If the filepath
     ///  has an `.gz` extension, the output will be gzip compressed.
     ///  If `filepath` is `None`, uncompressed output will be written to standard out.
     pub fn write_tsv(&self, filepath: Option<&str>) -> Result<(), RecMapError> {
-        let precision = 8;
         let mut writer: Box<dyn Write> = match filepath {
             Some(path) => {
                 let file = OutputFile::new(path, None);
@@ -383,7 +524,7 @@ impl RecMap {
                 // Write the record to the file
                 let rate_rescaled: RateFloat = rate / CM_MB_CONVERSION;
 
-                let formatted_rate = format!("{:.1$e}", rate_rescaled, precision);
+                let formatted_rate = format!("{:.1$e}", rate_rescaled, RATE_PRECISION);
 
                 // Write the record to the file
                 writeln!(
@@ -398,34 +539,108 @@ impl RecMap {
     }
 }
 
+fn format_float<T>(x: T) -> String
+where
+    T: Float + LowerExp,
+{
+    format!("{:.1$e}", x, RATE_PRECISION)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::RecMap;
+    use super::Position;
+    use crate::{
+        numeric::{assert_float_eq, assert_floats_eq},
+        prelude::*,
+    };
+    use indexmap::IndexMap;
     use tempfile::tempdir;
 
-    fn read_hapmap() -> RecMap {
+    fn mock_seqlens() -> IndexMap<String, Position> {
         let seqlens = indexmap::indexmap! {
-            "chr1".to_string() => 6980669,
-            "chr2".to_string() => 6004443,
-            "chr3".to_string() => 6026894,
+            "chr1".to_string() => 25,
+            "chr2".to_string() => 32,
+            "chr3".to_string() => 22,
         };
-        let rec_map = RecMap::from_hapmap("tests_data/decode_2010_test_map.txt", seqlens).unwrap();
+        seqlens
+    }
 
-        let dir = tempdir().unwrap();
-        let output_path = dir.path().join("output.tsv");
-
-        rec_map
-            .write_tsv(Some(output_path.to_str().unwrap()))
-            .unwrap();
-
-        dir.close().unwrap();
+    fn read_hapmap() -> RecMap {
+        let seqlens = mock_seqlens();
+        let rec_map = RecMap::from_hapmap("tests_data/test_hapmap.txt", &seqlens).unwrap();
         rec_map
     }
 
+    fn to_morgans(x: Vec<RateFloat>) -> Vec<RateFloat> {
+        x.iter().map(|v| v * CM_MB_CONVERSION).collect()
+    }
+
     #[test]
-    fn test_hapmap_read() {
+    fn test_read_hapmap() {
         let rm = read_hapmap();
         assert_eq!(rm.len(), 3);
         assert!(!rm.is_empty());
+
+        dbg!(&rm.map.get("chr1").unwrap().map_pos);
+
+        let chr1_map = rm.map.get("chr1").unwrap();
+        assert_eq!(chr1_map.ends.len(), chr1_map.rates.len() + 1);
+        assert_eq!(chr1_map.ends, vec![0, 10, 15, 20, 25]);
+        assert_eq!(chr1_map.rates, to_morgans(vec![0.0, 1.10, 1.50, 4.33]));
+
+        // cumulative map calculation:
+        // [0-10): *implied 0.0*
+        // [10-15): 1.10
+        // [15-20): 1.50
+        // [20-25): 4.33 *to end*
+        // ----
+        // 5bp * 1.10 = 5.5
+        // 5bp * 1.5 = 7.5 + 5.5 = 13
+        // 5bp * 4.33 = 21.65 + 13 = 34.65
+        // total = 34.65
+
+        let total_len = *chr1_map.total_map_length().unwrap();
+        assert_float_eq(total_len, 34.65 * CM_MB_CONVERSION, 1e-3);
+        assert_floats_eq(
+            &chr1_map.map_pos,
+            &to_morgans(vec![0.0, 5.5, 13., 34.65]),
+            1e-3,
+        );
+    }
+
+    #[test]
+    #[ignore = "for debugging"]
+    fn test_write_hapmap_local() {
+        // this writes the output "locally" in the project directory
+        // for easier debugging.
+        let seqlens = mock_seqlens();
+
+        let rm = read_hapmap();
+
+        let filepath = "test_hapmap.txt";
+
+        rm.write_hapmap(Some(filepath)).unwrap();
+
+        let rm_readin = RecMap::from_hapmap(filepath, &seqlens).unwrap();
+
+        assert_eq!(rm_readin, rm);
+    }
+
+    #[test]
+    fn test_write_hapmap() {
+        let seqlens = mock_seqlens();
+
+        let rm = read_hapmap();
+
+        // temp dir
+        let dir = tempdir().unwrap();
+        let binding = dir.path().join("test_hapmap.txt");
+        let filepath = binding.to_str().unwrap();
+
+        rm.write_hapmap(Some(filepath)).unwrap();
+
+        let rm_readin = RecMap::from_hapmap(filepath, &seqlens).unwrap();
+
+        assert_eq!(rm_readin, rm);
     }
 }

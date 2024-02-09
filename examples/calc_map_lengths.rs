@@ -16,7 +16,7 @@ struct Args {
 fn main() -> Result<(), RecMapError> {
     let args = Args::parse();
     let seqlens = read_seqlens(&args.seqlens)?;
-    let rec_map = RecMap::from_hapmap(&args.hapmap, seqlens)?;
+    let rec_map = RecMap::from_hapmap(&args.hapmap, &seqlens)?;
 
     for (name, rate_map) in rec_map.iter() {
         println!("{}\t{}", name, rate_map.total_map_length().unwrap());

@@ -30,6 +30,12 @@ This example can be run on the command line with:
 cargo run --example  calc_map_lengths --  --seqlens hg38_seqlens.tsv decode_2019_map.txt
 ```
 
+One of the most common tasks when working with recombination maps is to
+estimate the map position of arbitrary markers, which is usually done by linear
+interpolation. `RecMap` provides an easy way to do this for one position
+(`RecMap.interpolate_map_position()`) and for many positions, with 
+`RecMap.interpolate_map_positions()`:
+
 ```rust
 use recmap::prelude::*;
 let seqlens = read_seqlens("hg38_seqlens.tsv")

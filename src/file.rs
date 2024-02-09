@@ -34,6 +34,9 @@ fn is_gzipped_file(file_path: &str) -> io::Result<bool> {
 /// to be read through a common interface.
 pub struct InputFile {
     pub filepath: String,
+    pub comments: Option<Vec<String>>,
+    pub header: Option<String>,
+    pub skip_lines: usize,
 }
 
 impl InputFile {
@@ -46,6 +49,9 @@ impl InputFile {
     pub fn new(filepath: &str) -> Self {
         Self {
             filepath: filepath.to_string(),
+            comments: None,
+            header: None,
+            skip_lines: 0,
         }
     }
 
@@ -70,23 +76,49 @@ impl InputFile {
         Ok(BufReader::new(reader))
     }
 
-    /// Checks if the first line of the file matches the expected header.
-    ///
-    /// # Arguments
-    ///
-    /// * `expect` - A string slice representing the expected header.
-    ///
-    /// # Returns
-    ///
-    /// A result containing a boolean, `true` if the header matches, `false` otherwise,
-    /// or a `FileError` on failure.
-    ///
-    pub fn has_header(&self, expect: &str) -> Result<bool, FileError> {
+    /// Collects comment lines and/or a line at the start of the file.
+    pub fn collect_metadata(&mut self, comment: &str, header: &str) -> Result<bool, FileError> {
         let mut buf_reader = self.reader()?;
-        let mut first_line = String::new();
-        buf_reader.read_line(&mut first_line)?;
-        let has_header = first_line.starts_with(expect);
-        Ok(has_header)
+        let mut comments = Vec::new();
+        let mut line = String::new();
+
+        while buf_reader.read_line(&mut line)? > 0 {
+            if line.starts_with(comment) {
+                comments.push(line.trim_end().to_string());
+                self.skip_lines += 1;
+            } else {
+                if line.starts_with(header) {
+                    self.header = Some(line.trim_end().to_string());
+                    self.skip_lines += 1;
+                    // We only handle one header line. If there are more, the
+                    // file is *very* poorly formatted. So just let downstream
+                    // parsing errors catch this. In the future, we could have a specialized
+                    // error.
+                    break;
+                }
+                // break on the first non-header/comment line
+                break;
+            }
+            line.clear();
+        }
+
+        self.comments = Some(comments);
+        Ok(self.skip_lines > 0)
+    }
+
+    /// Method to continue reading after skipping the comment and header lines.
+    pub fn continue_reading(&self) -> Result<BufReader<Box<dyn Read>>, FileError> {
+        let mut buf_reader = self.reader()?;
+        let mut skipped_lines = 0;
+        let mut line = String::new();
+
+        // skip the lines that were previously read as comments or header
+        while skipped_lines < self.skip_lines {
+            buf_reader.read_line(&mut line)?;
+            skipped_lines += 1;
+            line.clear();
+        }
+        Ok(buf_reader)
     }
 }
 
