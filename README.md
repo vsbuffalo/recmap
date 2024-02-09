@@ -1,9 +1,9 @@
 ![Crates.io](https://img.shields.io/crates/v/recmap) ![Crates.io](https://img.shields.io/crates/d/recmap) [![docs](https://docs.rs/recmap/badge.svg)](https://docs.rs/recmap) ![Rust CI](https://github.com/vsbuffalo/recmap/actions/workflows/rust.yml/badge.svg)
 
 
-# RecMap library for reading and working with recombination maps in Rust
+# RecMap library (and command line tool) for reading and working with recombination maps in Rust
 
-`RecMap` objects can be created from reading in a HapMap-formatted 
+A `RecMap` object can be created from reading in a HapMap-formatted 
 recombination map. Note that since the HapMap recombination format does
 not include the chromosome lengths, this must be specified too.
 A convenience function `read_seqlens` is provided to read in TSV-formatted
@@ -46,5 +46,35 @@ let rec_map = RecMap::from_hapmap("decode_2019_map.txt", seqlens)
 let positions = vec![11975064, 15007450];
 rec_map.interpolate_map_positions("chr1", &positions);
 
+```
+
+## Command line tool
+
+Additionally, `recmap` had an optional command line tool feature that
+interpolates recombination map positions and recombination rates, given BED3
+input:
+
+```
+$ recmap interp --seqlens hg38_seqlens.tsv --hapmap decode_2019_map.txt \
+   hg38_1Mb_windows.bed --output decode_2019_map_1Mb_summaries.tsv --header
+```
+
+Currently the command line tool only has one subcommand, though more features
+may be added. Please [file an
+issue](https://github.com/vsbuffalo/recmap/issues) if there is a feature you'd
+like!
+
+## Installation 
+
+To use the library in your own Rust projects, install with:
+
+```
+$ cargo add recmap
+```
+
+To install the command line tool, use:
+
+```
+$ cargo install recmap
 ```
 

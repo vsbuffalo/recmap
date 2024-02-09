@@ -43,8 +43,13 @@ enum Commands {
     ///  - recombination rate in [start, end) (in cM/Mb)
     ///
     /// Example:
+    ///
     ///  $ recmap interp --seqlens hg38_seqlens.tsv --hapmap decode_2019_map.txt \
     ///      hg38_1Mb_windows.bed --output decode_2019_map_1Mb_summaries.tsv --header
+    ///
+    /// It is highly advised all recombination map output is validated visually,
+    /// since it is not uncommon for recombination maps to implement non-standard
+    /// variants of the HapMap recombination map format.
     Interp {
         /// a TSV file of chromosome names and their lengths
         #[arg(long, required = true)]
