@@ -1,4 +1,5 @@
-[![Crates.io](https://img.shields.io/crates/v/recmap)](https://crates.io/crates/recmap) [![Crates.io](https://img.shields.io/crates/d/recmap)](https://crates.io/crates/recmap) [![docs](https://docs.rs/recmap/badge.svg)](https://docs.rs/recmap) [![Rust CI](https://github.com/vsbuffalo/recmap/actions/workflows/rust.yml/badge.svg)](https://github.com/vsbuffalo/recmap/actions)
+[![Crates.io](https://img.shields.io/crates/v/recmap)](https://crates.io/crates/recmap) [![Crates.io](https://img.shields.io/crates/d/recmap)](https://crates.io/crates/recmap) [![docs](https://docs.rs/recmap/badge.svg)](https://docs.rs/recmap) [![Rust CI](https://github.com/vsbuffalo/recmap/actions/workflows/rust.yml/badge.svg)](https://github.com/vsbuffalo/recmap/actions) [![DOI](https://zenodo.org/badge/754486051.svg)](https://zenodo.org/doi/10.5281/zenodo.10642333)
+
 
 
 # RecMap library (and command line tool) for reading and working with recombination maps in Rust
