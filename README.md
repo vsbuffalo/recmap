@@ -75,6 +75,6 @@ $ cargo add recmap
 To install the command line tool, use:
 
 ```
-$ cargo install recmap
+$ cargo install recmap --features=cli
 ```
 
