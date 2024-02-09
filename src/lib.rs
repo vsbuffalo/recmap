@@ -45,7 +45,7 @@
 //!
 //! ```
 
-mod file;
+pub mod file;
 mod numeric;
 pub mod recmap;
 

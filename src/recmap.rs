@@ -1,8 +1,8 @@
 use genomap::{GenomeMap, GenomeMapError};
 use indexmap::map::IndexMap;
-use ndarray::Array1;
 use num_traits::Float;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::fmt::LowerExp;
 use std::io;
 use std::io::BufRead;
@@ -26,6 +26,7 @@ pub type Position = u64;
 
 pub const CM_MB_CONVERSION: RateFloat = 1e-8;
 pub const RATE_PRECISION: usize = 8;
+pub const SCI_NOTATION_THRESH: usize = 8;
 
 #[derive(Error, Debug)]
 pub enum RecMapError {
@@ -41,7 +42,7 @@ pub enum RecMapError {
     ParseError(String),
     #[error("Improper Rate value, either NaN or negative ({0})")]
     ImproperRate(String),
-    #[error("Chromosome key '{0}' does not exist")]
+    #[error("Chromosome key '{0}' does not exist in the recombination map")]
     NoChrom(String),
     #[error("HapMap file not sorted")]
     HapMapNotSorted,
@@ -226,7 +227,7 @@ impl RecMap {
     ) -> Result<RecMap, RecMapError> {
         let mut input_file = InputFile::new(filepath);
 
-        let _has_metadata = input_file.collect_metadata("#", "Chr")?;
+        let _has_metadata = input_file.collect_metadata("#", Some("Chr"))?;
         let reader = input_file.continue_reading()?;
 
         let mut rec_map: GenomeMap<RateMap> = GenomeMap::new();
@@ -273,7 +274,6 @@ impl RecMap {
             // get the position and rate column, parsing into proper numeric types
             let end_str = fields.get(1).ok_or(RecMapError::MissingField)?;
             let end: Position = end_str.parse().map_err(|_| {
-                dbg!(&end_str);
                 RecMapError::ParseError(format!("Failed to parse end from string: {}", end_str))
             })?;
 
@@ -425,12 +425,12 @@ impl RecMap {
         &self,
         chrom: &str,
         positions: &[Position],
-    ) -> Result<Array1<RateFloat>, RecMapError> {
+    ) -> Result<Vec<RateFloat>, RecMapError> {
         let positions: Vec<RateFloat> = positions
             .iter()
             .map(|p| self.interpolate_map_position(chrom, *p))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Array1::from_vec(positions))
+        Ok(positions)
     }
 
     /// Write recombination map to HapMap-formatted file.
@@ -539,11 +539,17 @@ impl RecMap {
     }
 }
 
-fn format_float<T>(x: T) -> String
+pub fn format_float<T>(x: T) -> String
 where
-    T: Float + LowerExp,
+    T: Float + LowerExp + Display,
 {
-    format!("{:.1$e}", x, RATE_PRECISION)
+    let min = T::from(SCI_NOTATION_THRESH).unwrap();
+    let max = T::from(SCI_NOTATION_THRESH).unwrap();
+    if x.abs().log10() < -min || x.abs().log10() > max {
+        format!("{:.1$e}", x, RATE_PRECISION)
+    } else {
+        format!("{:.*}", RATE_PRECISION, x)
+    }
 }
 
 #[cfg(test)]

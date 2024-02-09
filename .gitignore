@@ -2,3 +2,5 @@
 decode_2019_map.txt
 hg38_seqlens.tsv
 
+hg38_1Mb_windows.bed
+genetic_map_GRCh37_chr1.txt

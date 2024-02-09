@@ -77,7 +77,11 @@ impl InputFile {
     }
 
     /// Collects comment lines and/or a line at the start of the file.
-    pub fn collect_metadata(&mut self, comment: &str, header: &str) -> Result<bool, FileError> {
+    pub fn collect_metadata(
+        &mut self,
+        comment: &str,
+        header: Option<&str>,
+    ) -> Result<bool, FileError> {
         let mut buf_reader = self.reader()?;
         let mut comments = Vec::new();
         let mut line = String::new();
@@ -86,8 +90,8 @@ impl InputFile {
             if line.starts_with(comment) {
                 comments.push(line.trim_end().to_string());
                 self.skip_lines += 1;
-            } else {
-                if line.starts_with(header) {
+            } else if let Some(header_string) = header {
+                if line.starts_with(header_string) {
                     self.header = Some(line.trim_end().to_string());
                     self.skip_lines += 1;
                     // We only handle one header line. If there are more, the
