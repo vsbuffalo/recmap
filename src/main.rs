@@ -19,7 +19,7 @@ Subcommands:
 ";
 
 #[derive(Parser)]
-#[clap(name = "sdf")]
+#[clap(name = "recmap")]
 #[clap(about = INFO)]
 struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
