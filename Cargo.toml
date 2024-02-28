@@ -1,6 +1,6 @@
 [package]
 name = "recmap"
-version = "0.2.4"
+version = "0.3.4"
 edition = "2021"
 license = "MIT"
 authors = ["Vince Buffalo <vsbuffalo@gmail.com>"]
@@ -16,6 +16,7 @@ path = "src/lib.rs"
 
 [features]
 cli = [ "clap" ]
+big-position = []
 
 [[bin]]
 name = "recmap"

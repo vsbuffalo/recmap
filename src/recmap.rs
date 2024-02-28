@@ -1,5 +1,6 @@
 use genomap::{GenomeMap, GenomeMapError};
 use indexmap::map::IndexMap;
+use ndarray::Array2;
 use num_traits::Float;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -10,6 +11,7 @@ use std::io::Write;
 use thiserror::Error;
 
 use crate::file::OutputFile;
+use crate::numeric::recomb_dist_matrix;
 
 use super::file::{FileError, InputFile};
 use super::numeric::interp1d;
@@ -17,12 +19,35 @@ use super::numeric::interp1d;
 /// The float type for recombination rates.
 pub type RateFloat = f64;
 
-/// The integer type for genomic positions.
+/// The main position type in `recmap`.
 ///
-/// # Developer Notes
-/// In the future, applications needing support for chromosomes longer than
-/// `i32::MAX` could change this through a `--feature`.
+/// This type is currently an unwrapped [`u32`]. This should handle
+/// chromosome lengths for nearly all species. In fact, the only exception
+/// known so far is lungfush (*Neoceratodus forsteri*), which has a chromosomes
+/// that reaches 5.4Gb (<https://www.nature.com/articles/s41586-021-03198-8l>).
+/// The [`u32::MAX`] is 4,294,967,295, i.e. 4.29 Gigabases, which means [`u32`] is
+/// just barely suitable for even the largest known chromosome. There is a
+/// performance and memory-efficiency tradeoff when using [`u64`] over [`u32`],
+/// so [`u32`] is used by default since it handles nearly all cases.
+///
+/// # Feature support for large chromosomes
+///
+/// If you are working with data from a species with unusually large chromosomes,
+/// you can compile `recmap` using the `--features=big-position` option, which will set
+/// the [`Position`] and [`PositionOffset`] to [`u64`] and [`i64`], respectively.
+///
+/// [`u32::MAX`]: std::u32::MAX
+#[cfg(not(feature = "big-position"))]
+pub type Position = u32;
+#[cfg(feature = "big-position")]
 pub type Position = u64;
+
+/// The main *signed* position type in recmap, to represent offsets (e.g.
+/// for adjust range coordinates, etc).
+#[cfg(not(feature = "big-position"))]
+pub type PositionOffset = i32;
+#[cfg(feature = "big-position")]
+pub type PositionOffset = i64;
 
 pub const CM_MB_CONVERSION: RateFloat = 1e-8;
 pub const RATE_PRECISION: usize = 8;
@@ -431,6 +456,35 @@ impl RecMap {
             .map(|p| self.interpolate_map_position(chrom, *p))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(positions)
+    }
+
+    /// Build the pairwise recombination distance matrix for the specified chromosome.
+    ///
+    /// Creates a `positions_x.len() x positions_y.len()` matrix of recombination
+    /// *distances* (in Morgans), for the supplied set of positions on the physical
+    /// map.
+    ///
+    /// # Arguments
+    ///  * `positions_x`: the first set of marker positions.
+    ///  * `positions_y`: the second set of marker positions (just repeat `positions_x` for a
+    ///    symmetric distance matrix).
+    ///  * `haldane`: whether to convert the recombination distances in *Morgans* to a
+    ///      unit-less recombination *fraction*.
+    ///  * `rec_floor`: an optional *floor* value; all elements in the matrix less than
+    ///      this value will be set to this value. This is sometimes useful in downstream
+    ///      processing when zero values create problems.
+    ///
+    pub fn recomb_dist_matrix(
+        &self,
+        chrom: &str,
+        positions_x: &[Position],
+        positions_y: &[Position],
+        haldane: bool,
+        min_rec: Option<RateFloat>,
+    ) -> Result<Array2<RateFloat>, RecMapError> {
+        let x_pos = self.interpolate_map_positions(chrom, positions_x)?;
+        let y_pos = self.interpolate_map_positions(chrom, positions_y)?;
+        Ok(recomb_dist_matrix(&x_pos, &y_pos, haldane, min_rec))
     }
 
     /// Write recombination map to HapMap-formatted file.

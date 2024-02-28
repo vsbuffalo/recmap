@@ -1,4 +1,4 @@
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 use num_traits::{cast::ToPrimitive, Float, NumCast};
 use std::{
     cmp::Ordering,
@@ -61,6 +61,45 @@ pub fn euclidean_distance<T: Float>(x: T, y: T) -> T {
 #[allow(dead_code)]
 fn haldane_inverse<T: Float>(map_distance: T) -> T {
     T::from(0.5).unwrap() * (T::one() - (T::from(-2.0).unwrap() * map_distance).exp())
+}
+
+/// Build the pairwise recombination distance matrix, using some float-like type `T`.
+///
+/// Creates a `positions_x.len() x positions_y.len()` matrix of recombination
+/// *distances* (in Morgans), for the supplied set of positions on the physical
+/// map.
+///
+/// # Arguments
+///  * `positions_x`: an [`ArrayView1`] of the first set of marker positions.
+///  * `positions_y`: an [`ArrayView1`] of the second set of marker positions.
+///  * `haldane`: whether to convert the recombination distances in *Morgans* to a
+///      unit-less recombination *fraction*.
+///  * `rec_floor`: an optional *floor* value; all elements in the matrix less than
+///      this value will be set to this value. This is sometimes useful in downstream
+///      processing when zero values create problems.
+///
+pub fn recomb_dist_matrix<T: Float>(
+    positions_x: &[T],
+    positions_y: &[T],
+    haldane: bool,
+    min_rec: Option<T>,
+) -> Array2<T> {
+    let mut dist_matrix = Array2::<T>::zeros((positions_x.len(), positions_y.len()));
+    for (i, &pos_x) in positions_x.iter().enumerate() {
+        for (j, &pos_y) in positions_y.iter().enumerate() {
+            let dist = euclidean_distance(pos_x, pos_y);
+            let mut rf = if !haldane {
+                dist
+            } else {
+                haldane_inverse(dist)
+            };
+            if let Some(min_rec_rate) = min_rec {
+                rf = rf.max(min_rec_rate);
+            }
+            dist_matrix[[i, j]] = rf;
+        }
+    }
+    dist_matrix
 }
 
 #[derive(Debug, PartialEq)]
