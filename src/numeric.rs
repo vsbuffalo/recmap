@@ -82,7 +82,7 @@ pub fn recomb_dist_matrix<T: Float>(
     positions_x: &[T],
     positions_y: &[T],
     haldane: bool,
-    min_rec: Option<T>,
+    rec_floor: Option<T>,
 ) -> Array2<T> {
     let mut dist_matrix = Array2::<T>::zeros((positions_x.len(), positions_y.len()));
     for (i, &pos_x) in positions_x.iter().enumerate() {
@@ -93,7 +93,7 @@ pub fn recomb_dist_matrix<T: Float>(
             } else {
                 haldane_inverse(dist)
             };
-            if let Some(min_rec_rate) = min_rec {
+            if let Some(min_rec_rate) = rec_floor {
                 rf = rf.max(min_rec_rate);
             }
             dist_matrix[[i, j]] = rf;
@@ -164,7 +164,7 @@ where
             let y2 = ToPrimitive::to_f64(&y[idx])?;
             let x0 = ToPrimitive::to_f64(&x0)?;
 
-            // Perform linear interpolation
+            // linear interpolation
             let y0 = y1 + (y2 - y1) * (x0 - x1) / (x2 - x1);
 
             NumCast::from(y0)

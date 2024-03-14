@@ -176,14 +176,13 @@ impl RateMap {
         self.rates
             .iter()
             .zip(self.span().iter())
-            .map(|(&x, &y)| x * y as RateFloat)
+            .map(|(&rate, &span)| rate * span as RateFloat)
             .collect()
     }
 
-    /// Calculate the cumulative map length at each position.
+    /// Calculate the cumulative map length in Morgans at each position.
     pub fn calc_cumulative_mass(&mut self) {
         let mass = self.mass();
-        //println!("mass: {:?}", mass);
         let cumulative_sum: Vec<_> = mass
             .iter()
             .scan(0.0, |state, &x| {
@@ -358,7 +357,8 @@ impl RecMap {
                 new_rate_map.ends.push(end);
                 new_rate_map.rates.push(rate);
 
-                // if there is a fourth column, let's use it for validation
+                // if there is a fourth column, we could use it for validation
+                // TODO
                 if has_fourth_column {
                     //new_rate_map.calc_cumulative_mass();
                     //assert_floats_eq(&new_rate_map.map_pos, map_positions.as_slice(), 0.01);
@@ -392,6 +392,8 @@ impl RecMap {
             map: rec_map,
             metadata,
         };
+        // generate the map positions from the marker positions
+        // and the per-basepair rates..
         rec_map.generate_map_positions();
         Ok(rec_map)
     }
@@ -434,7 +436,9 @@ impl RecMap {
             .get(name)
             .ok_or(RecMapError::NoChrom(name.to_string()))?;
         let ends = &rate_map.ends;
-        let interp_result = interp1d(&ends[0..ends.len() - 1], &rate_map.map_pos, position);
+        let interp_result = interp1d(&ends[0..ends.len() - 1], 
+                                     &rate_map.map_pos, 
+                                     position);
         let interpolated_map_pos =
             interp_result.ok_or(RecMapError::LookupOutOfBounds(name.to_string(), position))?;
         Ok(interpolated_map_pos)
@@ -480,11 +484,11 @@ impl RecMap {
         positions_x: &[Position],
         positions_y: &[Position],
         haldane: bool,
-        min_rec: Option<RateFloat>,
+        rec_floor: Option<RateFloat>,
     ) -> Result<Array2<RateFloat>, RecMapError> {
         let x_pos = self.interpolate_map_positions(chrom, positions_x)?;
         let y_pos = self.interpolate_map_positions(chrom, positions_y)?;
-        Ok(recomb_dist_matrix(&x_pos, &y_pos, haldane, min_rec))
+        Ok(recomb_dist_matrix(&x_pos, &y_pos, haldane, rec_floor))
     }
 
     /// Write recombination map to HapMap-formatted file.
@@ -665,7 +669,7 @@ mod tests {
             &chr1_map.map_pos,
             &to_morgans(vec![0.0, 5.5, 13., 34.65]),
             1e-3,
-        );
+            );
     }
 
     #[test]
