@@ -149,6 +149,7 @@ where
     Tx: PartialOrd + ToPrimitive + Copy + Debug,
     Ty: ToPrimitive + NumCast + Copy + Debug,
 {
+    // dbg!((&x, &y, &x0));
     assert!(x.len() == y.len());
     let index = search_sorted(x, x0);
     match index {

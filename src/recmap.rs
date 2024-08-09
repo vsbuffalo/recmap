@@ -111,7 +111,7 @@ pub struct RateMap {
     pub ends: Vec<Position>,
     /// The n rates in Morgans, between each genomic position.
     pub rates: Vec<RateFloat>,
-    /// The n+1 cumulative map lengths at each genomic position.
+    /// The n cumulative map lengths at each genomic position.
     pub map_pos: Vec<RateFloat>,
 }
 
@@ -436,9 +436,17 @@ impl RecMap {
             .get(name)
             .ok_or(RecMapError::NoChrom(name.to_string()))?;
         let ends = &rate_map.ends;
-        let interp_result = interp1d(&ends[0..ends.len() - 1], 
-                                     &rate_map.map_pos, 
-                                     position);
+        // dbg!((&ends, &rate_map.map_pos));
+        assert_eq!(ends.len(), rate_map.map_pos.len() + 1);
+
+        // Create a new vector with 0 at the beginning, followed by map_pos
+        let extended_map_pos = std::iter::once(&0.0)
+            .chain(rate_map.map_pos.iter())
+            .cloned()
+            .collect::<Vec<f64>>();
+
+        // NOTE: This has changed recently <!> Still under review.
+        let interp_result = interp1d(&ends, &extended_map_pos, position);
         let interpolated_map_pos =
             interp_result.ok_or(RecMapError::LookupOutOfBounds(name.to_string(), position))?;
         Ok(interpolated_map_pos)
@@ -669,7 +677,7 @@ mod tests {
             &chr1_map.map_pos,
             &to_morgans(vec![0.0, 5.5, 13., 34.65]),
             1e-3,
-            );
+        );
     }
 
     #[test]
